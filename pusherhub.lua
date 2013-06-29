@@ -303,7 +303,7 @@ self.enterFrame = function(evt)
             b,_ = string.find(self.buffer, "{")
             if b ~= nil then
                 msg = string.sub(self.buffer,b)-- have to remember to strip off those frame header bytes!
-                print("removed header",msg)
+                --print("removed header",msg)
                 msg = json.decode(msg)
                 if msg ~= nil then -- valid json
                     -- Startup Connection parsing, specific to pusher.com
@@ -315,12 +315,14 @@ self.enterFrame = function(evt)
 
                     -- This is a pusher protocol error. Not fatal. Default behavior is disconnect()
                     elseif msg.event == "pusher:error" then
+                        msg.data = json.decode(msg["data"])
                         self.pushererrorCallback(msg)
                         --print("Nonfatal Err:",msg.data.message)
 
                     -- This is the catch-all binding code. If you have a handler, it gets called.
                     elseif self.channels[msg.channel] ~= nil and type(self.channels[msg.channel]["events"][msg.event]) == "function" then -- typical msg
                         --print("standard event")
+                        msg.data = json.decode(msg["data"])
                         self.channels[msg.channel]["events"][msg.event](msg)
                     end
                     headerbytesend = b-1
@@ -342,7 +344,7 @@ self.enterFrame = function(evt)
             -- 137 is 0x9 ping
             if chrs[1] == 137 then -- this is a ping, we can ignore chrs[2] which is usually 0
                 -- In response we will make a 0xA or [138 0]
-                print("pong!")
+                print("sending pong!")
                 local byes = self.sock:send(self.makeFrame(msg,true)) -- per spec, we have to send back anything that came with the ping
                 --print("bytes sent:",byes)
             end
@@ -350,7 +352,7 @@ self.enterFrame = function(evt)
             -- TODO: Implement a timeout if no pongpong in 30s
             -- 138 is their pong to our pong, pongpong!
             if chrs[1] == 138 then -- this is a pongpong response
-                print("pusher heard our pong")
+                print("got pongpong")
             end
 
             got_something_new = false
