@@ -265,14 +265,14 @@ self.enterFrame = function(evt)
     local msg, chr, str, headerbytesend
     local chrs = {}
     local got_something_new = false
-    local skt, e, p
+    local skt, e, p, b
     local input,output = socket.select({ self.sock },nil, 0) -- this is a way not to block runtime while reading socket. zero timeout does the trick
     for i,v in ipairs(input) do  -------------
         while  true  do
             skt, e, p = v:receive()
 
             -- MOST USEFUL DEBUG is this and print(util.xmp(chrs)) in handleBytes
-            --print("reading",skt,e,p) -- the "timeout" in the console is from "e" which is ok
+            print("reading",skt,e,p) -- the "timeout" in the console is from "e" which is ok
 
             -- if there is a p (msg) we don't read the e
             -- except, if p is "closed" it has no header frame. Specific to pusher.com Strange.
@@ -280,7 +280,7 @@ self.enterFrame = function(evt)
                 p = ''
                 e = tostring(e).."closed"
             end
-            if (p ~= nil and p ~= "closed" and p ~= '') then
+            if (p ~= nil and p ~= '') then
                 --print("p",p)
                 got_something_new = true -- probably a good msg
                 self.buffer = self.buffer..p
@@ -300,10 +300,10 @@ self.enterFrame = function(evt)
             --print("somethingnew",self.buffer)
             headerbytesend = string.len(self.buffer)
             -- Standard message for pusher.com (some bytes header, then json)
-            local b,e = string.find(self.buffer, "{")
+            b,_ = string.find(self.buffer, "{")
             if b ~= nil then
                 msg = string.sub(self.buffer,b)-- have to remember to strip off those frame header bytes!
-                --print(msg)
+                print("removed header",msg)
                 msg = json.decode(msg)
                 if msg ~= nil then -- valid json
                     -- Startup Connection parsing, specific to pusher.com
@@ -320,27 +320,40 @@ self.enterFrame = function(evt)
 
                     -- This is the catch-all binding code. If you have a handler, it gets called.
                     elseif self.channels[msg.channel] ~= nil and type(self.channels[msg.channel]["events"][msg.event]) == "function" then -- typical msg
+                        --print("standard event")
                         self.channels[msg.channel]["events"][msg.event](msg)
                     end
                     headerbytesend = b-1
                 end
+                b = nil
+                msg = nil
             end
             -- This is usually 129 (text frame header) + another char telling you the message size in bytes
             -- since b -> end of buffer is the json message
             chrs = self.handleBytes(string.sub(self.buffer,1,headerbytesend))
-            -- 137 is 0x9 ping
-            if chrs[1] == 137 then -- this is a ping, we can ignore chrs[2] which is usually 0
-                --print("heard ping...sending pong as keepalive")
-                local byes = self.sock:send(self.makeFrame(msg,true)) -- per spec, we have to send back anything that came with the ping
-                --print("bytes sent:",byes)
-            end
+            self.buffer = ''
+
             -- 136 is 0x8 close
             if chrs[1] == 136 then -- this is a close message
                 print("heard close message")
                 self.disconnect()
             end
+
+            -- 137 is 0x9 ping
+            if chrs[1] == 137 then -- this is a ping, we can ignore chrs[2] which is usually 0
+                -- In response we will make a 0xA or [138 0]
+                print("pong!")
+                local byes = self.sock:send(self.makeFrame(msg,true)) -- per spec, we have to send back anything that came with the ping
+                --print("bytes sent:",byes)
+            end
+
+            -- TODO: Implement a timeout if no pongpong in 30s
+            -- 138 is their pong to our pong, pongpong!
+            if chrs[1] == 138 then -- this is a pongpong response
+                print("pusher heard our pong")
+            end
+
             got_something_new = false
-            self.buffer = ''
         end
     end
 end -- /enterFrame
