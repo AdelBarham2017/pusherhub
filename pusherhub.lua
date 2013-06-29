@@ -67,9 +67,9 @@ self.makeFrame = function(str,pong)
     binStr = binStr.."000" -- RSV1,RSV2,RESV3,
                            -- the 'Sec-WebSocket-Extensions: x-webkit-deflate-frame' + RSV1 doesn't have an effect
     if not pong then
-        binStr = binStr.."0001" -- %x1 denotes a text frame (I guess this means 0001) - confirmed
+        binStr = binStr.."0010" -- %x1 denotes a text frame (I guess this means 0001) - confirmed
     else
-        binStr = binStr.."1010" -- %xA denotes a pong frame
+        binStr = binStr.."1001" -- %xA denotes a pong frame
     end
     bitGroups[#bitGroups+1] = binStr -- we dump the value and have a byte
 
@@ -152,10 +152,8 @@ self.new = function (params) -- constructor method
     self.pushererrorCallback = params.pushererrorCallback or function() self.disconnect(); end
     self.server = params.server
     self.port = params.port
-    if params.headers ~= nil then
-        for i=1,#params.headers do
-            self.headers = self.headers..params.headers[i].."\n"
-        end
+    for i=1,#params.headers do
+        self.headers = self.headers..params.headers[i].."\n"
     end
     self.headers = self.headers.."\n"
     self.key = params.key
@@ -186,6 +184,7 @@ self.new = function (params) -- constructor method
     return self
 end
 self.subscribe = function(params)
+    local string_to_sign, proper, strange
     params.channel = params.channel or 'test_channel'
     params.private = false
     params.presence = false
@@ -206,24 +205,24 @@ self.subscribe = function(params)
     }
     if params.private or params.presence then
         --pusher.com docs say HMAC::SHA256.hexdigest(secret, string_to_sign),
-        local string_to_sign = self.socket_id..":"..params.channel
+        string_to_sign = self.socket_id..":"..params.channel
         -- in a presence channel... you need the channel_data appended - double encoded and stripped of outer quotes
-        local proper = json.encode(json.encode(params.channel_data))
-        local strange = string.sub(proper,2,string.len(proper)-1) -- wtf!
-        --print(strange)
         if params.presence then
-            string_to_sign = string_to_sign..":"..proper
+            proper = json.encode(json.encode(params.channel_data))
+            strange = string.sub(proper,2,string.len(proper)-1) -- wtf!
+            strange = string.gsub(strange,"\\","")
+            --print(strange)
+            string_to_sign = self.socket_id..":"..params.channel..":"..strange
         end
-        print(string_to_sign)
         --local hash = crypto.hmac( crypto.sha256,"1234.1234:presence-foobar:{\"user_id\":10,\"user_info\":{\"name\":\"Mr. Pusher\"}}","7ad3773142a6692b25b8")
         --print("hash",hash)
-        local auth = self.key..":"..crypto.hmac( crypto.sha256, string_to_sign, self.secret )
-        msg["data"]["auth"] = auth
-        msg["data"]["channel_data"] = json.encode(params.channel_data)
+        msg.data.auth = self.key..":"..crypto.hmac( crypto.sha256, string_to_sign, self.secret )
+        msg.data.channel_data = json.encode(params.channel_data)
     end
     msg = json.encode(msg)
     --print(msg)
     self.publish(msg)
+    print(string_to_sign)
     return true
 end
 self.unsubscribe = function(chan)
@@ -274,7 +273,10 @@ self.enterFrame = function(evt)
     for i,v in ipairs(input) do  -------------
         while  true  do
             skt, e, p = v:receive()
-            print("reading",skt,e,p) -- the "timeout" in the console is from "e" which is ok
+
+            -- MOST USEFUL DEBUG is this and print(util.xmp(chrs)) in handleBytes
+            --print("reading",skt,e,p) -- the "timeout" in the console is from "e" which is ok
+
             -- if there is a p (msg) we don't read the e
             -- except, if p is "closed" it has no header frame. Specific to pusher.com Strange.
             if p == "closed" then
@@ -313,18 +315,13 @@ self.enterFrame = function(evt)
                         self.socket_id = msg.socket_id
                         self.readyState = 1
                         self.readyCallback() -- should call subscribe, I hope! If not, whatever.
-                    elseif msg.event == "pusher_internal:subscription_succeeded" then
-                        if type(self.channels[msg.channel]["events"][msg.event]) == "function" then
-                            self.channels[msg.channel]["events"][msg.event](msg)
-                        end
-                    elseif msg.event == "pusher:subscription_error" then -- no resubscribe when subscribed, bad auth, etc.
-                        ---print("sub err")
-                        if self.channels[msg.channel] ~= nil and type(self.channels[msg.channel]["events"][msg.event]) == "function" then
-                            self.channels[msg.channel]["events"][msg.event](msg)
-                        end
-                    elseif msg.event == "pusher:error" then -- This is a pusher protocol error. Not fatal.
+
+                    -- This is a pusher protocol error. Not fatal. Default behavior is disconnect()
+                    elseif msg.event == "pusher:error" then
                         self.pushererrorCallback(msg)
                         --print("Nonfatal Err:",msg.data.message)
+
+                    -- This is the catch-all binding code. If you have a handler, it gets called.
                     elseif self.channels[msg.channel] ~= nil and type(self.channels[msg.channel]["events"][msg.event]) == "function" then -- typical msg
                         self.channels[msg.channel]["events"][msg.event](msg)
                     end
@@ -351,6 +348,7 @@ self.enterFrame = function(evt)
     end
 end -- /enterFrame
 return self
+
 
 --[[
 -- Example Usage 
