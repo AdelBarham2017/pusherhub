@@ -206,23 +206,20 @@ self.subscribe = function(params)
     if params.private or params.presence then
         --pusher.com docs say HMAC::SHA256.hexdigest(secret, string_to_sign),
         string_to_sign = self.socket_id..":"..params.channel
-        -- in a presence channel... you need the channel_data appended - double encoded and stripped of outer quotes
+        -- in a presence channel... you need the channel_data appended - double encoded and stripped of outer quotes...and slashes?
         if params.presence then
             proper = json.encode(json.encode(params.channel_data))
             strange = string.sub(proper,2,string.len(proper)-1) -- wtf!
-            strange = string.gsub(strange,"\\","")
+            strange = string.gsub(strange,"\\","") -- wtf x 2!
             --print(strange)
             string_to_sign = self.socket_id..":"..params.channel..":"..strange
         end
-        --local hash = crypto.hmac( crypto.sha256,"1234.1234:presence-foobar:{\"user_id\":10,\"user_info\":{\"name\":\"Mr. Pusher\"}}","7ad3773142a6692b25b8")
-        --print("hash",hash)
         msg.data.auth = self.key..":"..crypto.hmac( crypto.sha256, string_to_sign, self.secret )
         msg.data.channel_data = json.encode(params.channel_data)
     end
     msg = json.encode(msg)
     --print(msg)
     self.publish(msg)
-    print(string_to_sign)
     return true
 end
 self.unsubscribe = function(chan)
