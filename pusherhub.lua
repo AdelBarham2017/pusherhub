@@ -35,7 +35,14 @@ self.lpad = function(str, len, char)
     end
     return string.rep(char, len - #str)..str
 end
-self.tobits = function(num)
+self.bytesToDec = function(str)
+    local bits = ''
+    for i=1,string.len(str) do
+        bits = bits..self.toBits(string.byte(string.sub(str,i,i)))
+    end
+    return tonumber(bits,2)
+end
+self.toBits = function(num)
     -- returns a table of bits, least significant first.
     local t={} -- will contain the bits
     while num>0 do
@@ -44,6 +51,17 @@ self.tobits = function(num)
         num=(num-rest)/2
     end
     return string.reverse(table.concat(t))
+end
+self.parseHeader = function(headerbytes)
+    local fbyte = string.sub(headerbytes,1,1) -- first
+    local fbits = self.toBits(string.byte(fbyte))
+    local opcode = tonumber("0000"..string.sub(fbits,5),2)
+
+    local sbyte = string.sub(headerbytes,2) -- second, this strips the mask bit off
+    local sbits = self.toBits(string.byte(sbyte))
+    local payloadlen = tonumber("0"..sbits,2) -- this pads the missing mask bit on
+    --print("opcode:",opcode,"payloadlen:",payloadlen)
+    return opcode, payloadlen
 end
 self.handleBytes = function(byes)
     --print("some binary msg",byes)
@@ -97,8 +115,8 @@ self.makeFrame = function(str,pong)
             -- TODO: Construct continuation frames for when data is too large?! Don't know what limit pusher has.
         end
     end
-    --print(strLen,self.tobits(strLen))
-    binStr = binStr..self.lpad(self.tobits(strLen),pad,"0") -- 7 or 7+16 or 7+64 bits to represent message byte length
+    --print(strLen,self.toBits(strLen))
+    binStr = binStr..self.lpad(self.toBits(strLen),pad,"0") -- 7 or 7+16 or 7+64 bits to represent message byte length
     --print(binStr)
 
     local s = 1
@@ -134,7 +152,7 @@ self.new = function (params) -- constructor method
     end
     -- Headers are legitimate, since Chrome uses them in pusher.com's test page
     params.headers = params.headers or {
-        'GET /app/'..params.key..'?protocol=6&client=lua&version=1.1&flash=false HTTP/1.1',
+        'GET /app/'..params.key..'?protocol=6&client=lua&version=2.0&flash=false HTTP/1.1',
         'Host: '..params.server,
         'Sec-WebSocket-Key: '..self.websocketresponse6(params.app_id), -- anything is fine, might as well use the app_id for something
         'Upgrade: websocket',
@@ -262,7 +280,7 @@ self.publish = function(msg)
     return true
 end
 self.enterFrame = function(evt)
-    local msg, chr, str, headerbytesend
+    local msg, chr, str, opcode, payloadlen, payloadstart, payloadend
     local chrs = {}
     local got_something_new = false
     local skt, e, p, b
@@ -272,7 +290,7 @@ self.enterFrame = function(evt)
             skt, e, p = v:receive()
 
             -- MOST USEFUL DEBUG is this and print(util.xmp(chrs)) in handleBytes
-            print("reading",skt,e,p) -- the "timeout" in the console is from "e" which is ok
+            --print("reading",skt,e,p) -- the "timeout" in the console is from "e" which is ok
 
             -- if there is a p (msg) we don't read the e
             -- except, if p is "closed" it has no header frame. Specific to pusher.com Strange.
@@ -296,66 +314,78 @@ self.enterFrame = function(evt)
             end
         end -- /while-do
         -- now, checking if a message is present in buffer...
-        if got_something_new then  --  this is for a case of several messages stocker in the buffer
-            --print("somethingnew",self.buffer)
-            headerbytesend = string.len(self.buffer)
+        while got_something_new do  --  this is for a case of several messages stocker in the buffer
+            --print("buffer:"..string.len(self.buffer),self.buffer)
             -- Standard message for pusher.com (some bytes header, then json)
-            b,_ = string.find(self.buffer, "{")
-            if b ~= nil then
-                msg = string.sub(self.buffer,b)-- have to remember to strip off those frame header bytes!
-                --print("removed header",msg)
-                msg = json.decode(msg)
-                if msg ~= nil then -- valid json
-                    -- Startup Connection parsing, specific to pusher.com
-                    if msg.event == "pusher:connection_established" then
-                        msg = json.decode(msg["data"])
-                        self.socket_id = msg.socket_id
-                        self.readyState = 1
-                        self.readyCallback() -- should call subscribe, I hope! If not, whatever.
 
-                    -- This is a pusher protocol error. Not fatal. Default behavior is disconnect()
-                    elseif msg.event == "pusher:error" then
-                        msg.data = json.decode(msg["data"])
-                        self.pushererrorCallback(msg)
-                        --print("Nonfatal Err:",msg.data.message)
-
-                    -- This is the catch-all binding code. If you have a handler, it gets called.
-                    elseif self.channels[msg.channel] ~= nil and type(self.channels[msg.channel]["events"][msg.event]) == "function" then -- typical msg
-                        --print("standard event")
-                        msg.data = json.decode(msg["data"])
-                        self.channels[msg.channel]["events"][msg.event](msg)
-                    end
-                    headerbytesend = b-1
-                end
-                b = nil
-                msg = nil
+            opcode, payloadlen = self.parseHeader(string.sub(self.buffer,1,2)) -- first 2 bytes tell us everything
+            payloadstart = 3 -- no more metadata
+            payloadend = payloadlen
+            bits = ''
+            if payloadlen == 126 then -- we have 2 more bytes of metadata
+                payloadstart = 5
+                payloadend = self.bytesToDec(string.sub(self.buffer,3,4))
+            elseif payloadlen == 127 then -- we have 8 more bytes of metadata (not 2)
+                payloadstart = 11
+                payloadend = self.bytesToDec(string.sub(self.buffer,3,10))
             end
-            -- This is usually 129 (text frame header) + another char telling you the message size in bytes
-            -- since b -> end of buffer is the json message
-            chrs = self.handleBytes(string.sub(self.buffer,1,headerbytesend))
-            self.buffer = ''
+            msg = string.sub(self.buffer, payloadstart, payloadstart+payloadend)
+            --print("msg",msg)
+            msg = json.decode(msg)
+            --print("decoded msg",msg)
+            if msg ~= nil then -- valid json
+                -- Startup Connection parsing, specific to pusher.com
+                if msg.event == "pusher:connection_established" then
+                    msg = json.decode(msg["data"])
+                    self.socket_id = msg.socket_id
+                    self.readyState = 1
+                    self.readyCallback() -- should call subscribe, I hope! If not, whatever.
 
-            -- 136 is 0x8 close
-            if chrs[1] == 136 then -- this is a close message
+                -- This is a pusher protocol error. Not fatal. Default behavior is disconnect()
+                elseif msg.event == "pusher:error" then
+                    msg.data = json.decode(msg["data"])
+                    self.pushererrorCallback(msg)
+                    --print("Nonfatal Err:",msg.data.message)
+
+                -- This is the catch-all binding code. If you have a handler, it gets called.
+                elseif self.channels[msg.channel] ~= nil and type(self.channels[msg.channel]["events"][msg.event]) == "function" then -- typical msg
+                    --print("standard event")
+                    msg.data = json.decode(msg["data"])
+                    self.channels[msg.channel]["events"][msg.event](msg)
+                end
+            end
+            if opcode == 0 then
+                -- TODO: continuation support
+                print("continuation frames are not yet supported!")
+            end
+            if opcode == 1 then -- typical text frame
+                -- noop
+            end
+            if opcode == 2 then
+                -- Pusher does not support binary frames
+                print("bad opcode, ignoring")
+            end
+            if opcode == 8 then -- this is a close message via opcode
                 print("heard close message")
                 self.disconnect()
             end
-
-            -- 137 is 0x9 ping
-            if chrs[1] == 137 then -- this is a ping, we can ignore chrs[2] which is usually 0
+            if opcode == 9 then -- this is a ping
                 -- In response we will make a 0xA or [138 0]
                 print("sending pong!")
-                local byes = self.sock:send(self.makeFrame(msg,true)) -- per spec, we have to send back anything that came with the ping
+                -- TODO: per spec, we have to send back anything that came with the ping
+                local byes = self.sock:send(self.makeFrame(msg,true))
                 --print("bytes sent:",byes)
             end
-
-            -- TODO: Implement a timeout if no pongpong in 30s
-            -- 138 is their pong to our pong, pongpong!
-            if chrs[1] == 138 then -- this is a pongpong response
+            -- 0xA is their pong to our pong, pongpong!
+            if opcode == 10 then -- this is a pongpong response
+                -- TODO: Implement a timeout if no pongpong in 30s
                 print("got pongpong")
             end
 
-            got_something_new = false
+            self.buffer = string.sub(self.buffer,payloadstart+payloadend)
+            if self.buffer == '' then
+                got_something_new = false
+            end
         end
     end
 end -- /enterFrame
