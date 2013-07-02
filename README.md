@@ -1,7 +1,7 @@
 pusherhub
 =========
 
-Lua Implementation of RFC 6445 and integrated with Pusher.com
+Lua Implementation of RFC 6455 and integrated with Pusher.com
 
 The pusher docs are... hard to get through 
 http://pusher.com/docs The API/Websocket information is mixed together. 
