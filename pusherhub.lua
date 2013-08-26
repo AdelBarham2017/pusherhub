@@ -314,7 +314,7 @@ self.enterFrame = function(evt)
             end
         end -- /while-do
         -- now, checking if a message is present in buffer...
-        while got_something_new do  --  this is for a case of several messages stocker in the buffer
+        while got_something_new do  --  this is for a case of several messages stocked in the buffer
             --print("buffer:"..string.len(self.buffer),self.buffer)
             -- Standard message for pusher.com (some bytes header, then json)
 
