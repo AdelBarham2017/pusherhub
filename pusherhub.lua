@@ -160,7 +160,7 @@ self.new = function (params) -- constructor method
         'Sec-WebSocket-Version: 13',
         --'Pragma: no-cache',
         --'Authentication: Basic '..(mime.b64(params.key..":"..params.secret)),
-        'Origin: http://jsonur.com',
+        'Origin: http://somedomain.com',
         --'User-Agent: Mozilla/5.0 (Windows NT 5.1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/27.0.1453.116 Safari/537.36', -- headers based on Chrome
         --'Sec-WebSocket-Extensions: x-webkit-deflate-frame',
         --'Cache-Control: no-cache',
