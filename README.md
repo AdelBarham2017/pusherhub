@@ -60,6 +60,6 @@ will receive the message in the function assigned to the client-message binding 
  
 This specific binding is called from this line, if you care:
 
-> self.channels[msg.channel]["events"][msg.event](msg)
+    self.channels[msg.channel]["events"][msg.event](msg)
 
 I put the mychathub in the scope of my scene as leaving the scene will destroy the connection. Some people may want to create it as a global resource. It's up to you.
