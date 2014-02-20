@@ -9,6 +9,7 @@
 local socket = require("socket")
 local mime = require("mime")
 local crypto = require("crypto")
+local json = require("json")
 
 local self = {
     socket_id = nil,
@@ -223,9 +224,9 @@ self.subscribe = function(params)
     }
     if params.private or params.presence then
         --pusher.com docs say HMAC::SHA256.hexdigest(secret, string_to_sign),
-        string_to_sign = self.socket_id..":"..params.channel
+        --string_to_sign = self.socket_id..":"..params.channel
         -- in a presence channel... you need the channel_data appended - double encoded and stripped of outer quotes...and slashes?
-        if params.presence then
+        if params.presence or params.private then
             proper = json.encode(json.encode(params.channel_data))
             strange = string.sub(proper,2,string.len(proper)-1) -- wtf!
             strange = string.gsub(strange,"\\","") -- wtf x 2!
@@ -336,21 +337,27 @@ self.enterFrame = function(evt)
             if msg ~= nil then -- valid json
                 -- Startup Connection parsing, specific to pusher.com
                 if msg.event == "pusher:connection_established" then
-                    msg = json.decode(msg["data"])
-                    self.socket_id = msg.socket_id
+                    if type(msg.data) == "string" then
+                     msg.data = json.decode(msg.data)
+                    end 
+                    self.socket_id = msg.data.socket_id
                     self.readyState = 1
                     self.readyCallback() -- should call subscribe, I hope! If not, whatever.
 
                 -- This is a pusher protocol error. Not fatal. Default behavior is disconnect()
                 elseif msg.event == "pusher:error" then
-                    msg.data = json.decode(msg["data"])
-                    self.pushererrorCallback(msg)
+                    if type(msg.data) == "string" then
+                     msg.data = json.decode(msg.data)
+                    end 
+                    self.pushererrorCallback(msg.data)
                     --print("Nonfatal Err:",msg.data.message)
 
                 -- This is the catch-all binding code. If you have a handler, it gets called.
                 elseif self.channels[msg.channel] ~= nil and type(self.channels[msg.channel]["events"][msg.event]) == "function" then -- typical msg
                     --print("standard event")
-                    msg.data = json.decode(msg["data"])
+                    if type(msg.data) == "string" then
+                     msg.data = json.decode(msg.data)
+                    end 
                     self.channels[msg.channel]["events"][msg.event](msg)
                 end
             end
