@@ -36,6 +36,8 @@ self.lpad = function(str, len, char)
     end
     return string.rep(char, len - #str)..str
 end
+
+-- Converts a string of bits into a decimal number.
 self.bytesToDec = function(str)
     local bits = ''
     for i=1,string.len(str) do
@@ -319,19 +321,39 @@ self.enterFrame = function(evt)
             --print("buffer:"..string.len(self.buffer),self.buffer)
             -- Standard message for pusher.com (some bytes header, then json)
 
-            opcode, payloadlen = self.parseHeader(string.sub(self.buffer,1,2)) -- first 2 bytes tell us everything
-            payloadstart = 3 -- no more metadata
-            payloadend = payloadlen
-            bits = ''
-            if payloadlen == 126 then -- we have 2 more bytes of metadata
-                payloadstart = 5
-                payloadend = self.bytesToDec(string.sub(self.buffer,3,4))
-            elseif payloadlen == 127 then -- we have 8 more bytes of metadata (not 2)
-                payloadstart = 11
-                payloadend = self.bytesToDec(string.sub(self.buffer,3,10))
+            -- first 2 bytes tell us a great deal.
+            -- specificially, the payload length (or indicator that it's [126] a big int or [127] a REALLY big int)
+            opcode, payloadlen = self.parseHeader(string.sub(self.buffer,1,2)) -- returns a tuple
+
+            payloadstart = 3 -- bytes. no more metadata. the start byte number is offset by 2 bytes of required metadata
+            payloadend = payloadlen+2 -- bytes. the end byte number is offset by 2 bytes of required metadata
+
+            if payloadlen == 126 then -- we have 2 more bytes of metadata...beyond the required 2
+                payloadstart = 5 -- starts on 5th byte.
+                                 -- first 4 bytes of message are header data.
+                                 -- 2 required meta, 2 payload length description (16 bits)
+
+                -- bytesToDec converts the bits in the included bytes, to a decimal number
+                payloadend = self.bytesToDec(string.sub(self.buffer,3,4)) -- this is inclusive, 3rd and 4th bytes
+                                                                          -- represents the number of payload bytes
+                payloadend = payloadend+2 -- bytes. offset by 2 more bytes of the payload length metadata
+            elseif payloadlen == 127 then -- we have 8 more bytes of metadata
+                payloadstart = 11 -- starts on 11th byte.
+                                  -- first 10 bytes of message are header data.
+                                  -- 2 required meta, 8 payload length description (64 bits)
+
+                -- bytesToDec converts the bits in the included bytes, to a decimal number
+                payloadend = self.bytesToDec(string.sub(self.buffer,3,10)) -- this is inclusive, 3rd through 10th bytes
+                                                                           -- represents the number of payload bytes
+                payloadend = payloadend+8 -- bytes. offset by 8 more bytes of the payload length metadata
             end
-            msg = string.sub(self.buffer, payloadstart, payloadstart+payloadend)
+
+            -- this needs to be correct so that we're sure of how long the message is
+            -- most clients, like firefox or chrome, cut off after 32k as of 2012 and probably till today
+            msg = string.sub(self.buffer, payloadstart, payloadend)
+
             --print("msg",msg)
+
             msg = json.decode(msg)
             --print("decoded msg",msg)
             if msg ~= nil then -- valid json
