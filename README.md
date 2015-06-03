@@ -65,38 +65,39 @@ This specific binding is called from this line, if you care:
 I put the mychathub in the scope of my scene as leaving the scene will destroy the connection. Some people may want to create it as a global resource. It's up to you.
 
 Some people aren't noticing the example usage at the bottom of the pusherhub.lua:
---[[
--- Example Usage 
-    print("connecting to chat server...")
-    mychathub = nil -- global
-    mychathub = pusherhub.new({ 
-        app_id = '12345', -- Example
-        key = '278d425bdf160c739803', -- Example http://pusher.com/docs/auth_signatures
-        secret = '7ad3773142a6692b25b8', -- Example http://pusher.com/docs/auth_signatures
-        server = "ws.pusherapp.com",
-        port = 80,
-        disconnectCallback = function()
-            scene:dispatchEvent("chatDisconnect",scene)
-        end,
-        pushererrorCallback = function()
-            scene:dispatchEvent("chatError", scene)
-            scene:dispatchEvent("chatDisconnect",scene)
-        end,
-        readyCallback = function()
-            print("Connected to chat server.")
-            print("Attempting to join Gen Chat...")
-            mychathub.subscribe({
-                channel = "test_channel",
-                bindings = {
-                    ["client-message"] = function(msg1)
-                        print("test client-message",msg1)
-                    end,
-                    ["pusher_internal:subscription_succeeded"] = function(msg2) -- Msg2 is a table
-                        print("test pusher_internal:subscription_succeeded",msg2.event) 
-                        print("Joined Gen Chat.")
-                    end
-                }
-            })
-        end
-    })
-]]--
+
+    --[[
+    -- Example Usage 
+        print("connecting to chat server...")
+        mychathub = nil -- global
+        mychathub = pusherhub.new({ 
+            app_id = '12345', -- Example
+            key = '278d425bdf160c739803', -- Example http://pusher.com/docs/auth_signatures
+            secret = '7ad3773142a6692b25b8', -- Example http://pusher.com/docs/auth_signatures
+            server = "ws.pusherapp.com",
+            port = 80,
+            disconnectCallback = function()
+                scene:dispatchEvent("chatDisconnect",scene)
+            end,
+            pushererrorCallback = function()
+                scene:dispatchEvent("chatError", scene)
+                scene:dispatchEvent("chatDisconnect",scene)
+            end,
+            readyCallback = function()
+                print("Connected to chat server.")
+                print("Attempting to join Gen Chat...")
+                mychathub.subscribe({
+                    channel = "test_channel",
+                    bindings = {
+                        ["client-message"] = function(msg1)
+                            print("test client-message",msg1)
+                        end,
+                        ["pusher_internal:subscription_succeeded"] = function(msg2) -- Msg2 is a table
+                            print("test pusher_internal:subscription_succeeded",msg2.event) 
+                            print("Joined Gen Chat.")
+                        end
+                    }
+                })
+            end
+        })
+    ]]--
