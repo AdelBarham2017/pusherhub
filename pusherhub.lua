@@ -48,6 +48,7 @@ end
 self.toBits = function(num)
     -- returns a table of bits, least significant first.
     local t={} -- will contain the bits
+    local rest = nil
     while num>0 do
         rest=math.fmod(num,2)
         t[#t+1]=rest
@@ -107,21 +108,23 @@ self.makeFrame = function(str,pong)
     if strLen > 125 then
         --print("we're over 125")
         if strLen <= 65536 then
+            --print("less than max, using 16 bit")
             binStr = binStr.."1111110"
             -- 16 bit time
             pad = 16
         else
-            --print("we're over 65536?")
+            --print("over max of 65536, using 64 bit")
             binStr = binStr.."1111111"
             -- 64 bit time!
             pad = 64
             -- TODO: Construct continuation frames for when data is too large?! Don't know what limit pusher has.
         end
     end
-    --print(strLen,self.toBits(strLen))
+    --print("strLen is",strLen,self.toBits(strLen))
     binStr = binStr..self.lpad(self.toBits(strLen),pad,"0") -- 7 or 7+16 or 7+64 bits to represent message byte length
-    --print(binStr)
+    --print("binStr",binStr, "pad:", pad)
 
+    -- This chops the binStr into 8 bit groups, called bitgroups (bytes)
     local s = 1
     local e = 8
     while e < pad+9 do
@@ -136,7 +139,7 @@ self.makeFrame = function(str,pong)
         -- Now that we've assembled a delicate set of bits, move to bytes
         ret = ret..string.char(tonumber(bitGroups[i],2))
     end
-    --print(table.concat(bitGroups),string.len(str)) -- use http://home.paulschou.net/tools/xlate/
+    --print("final size",table.concat(bitGroups),str,string.len(str)) -- use http://home.paulschou.net/tools/xlate/
     -- Leading bytes are the header for the frame. Ta-da
     return ret..str
 end
@@ -206,13 +209,17 @@ self.new = function (params) -- constructor method
 end
 self.subscribe = function(params)
     local string_to_sign, proper, strange
+    print("channel data was",params.channel_data)
+    if type(params.channel_data) ~= 'table' then
+        params.channel_data = {}
+    end
     params.channel = params.channel or 'test_channel'
     params.private = false
     params.presence = false
     if string.sub(params.channel,1,8) == "private-" then
         params.private = true
     end
-    if params.channel_data and string.sub(params.channel,1,9) == "presence-" then
+    if string.sub(params.channel,1,9) == "presence-" then
         params.presence = true
     end
     self.channels[params.channel] = { -- this could get ugly if you resubscribe with new events
@@ -228,13 +235,11 @@ self.subscribe = function(params)
         --pusher.com docs say HMAC::SHA256.hexdigest(secret, string_to_sign),
         --string_to_sign = self.socket_id..":"..params.channel
         -- in a presence channel... you need the channel_data appended - double encoded and stripped of outer quotes...and slashes?
-        if params.presence or params.private then
-            proper = json.encode(json.encode(params.channel_data))
-            strange = string.sub(proper,2,string.len(proper)-1) -- wtf!
-            strange = string.gsub(strange,"\\","") -- wtf x 2!
-            --print(strange)
-            string_to_sign = self.socket_id..":"..params.channel..":"..strange
-        end
+        proper = json.encode(json.encode(params.channel_data))
+        strange = string.sub(proper,2,string.len(proper)-1) -- wtf!
+        strange = string.gsub(strange,"\\","") -- wtf x 2!
+        --print(strange)
+        string_to_sign = self.socket_id..":"..params.channel..":"..strange
         msg.data.auth = self.key..":"..crypto.hmac( crypto.sha256, string_to_sign, self.secret )
         msg.data.channel_data = json.encode(params.channel_data)
     end

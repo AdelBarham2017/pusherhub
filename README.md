@@ -31,7 +31,7 @@ Configure the pusherhub object (mychathub in the example usage) with those value
 
     mychathub = pusherhub.new({
         app_id = '12345', -- Example
-        key = '278d425bdf160c739803', -- Example http://pusher.com/docs/auth_signatures
+        key = '278d425bdf160c739803',    -- Example http://pusher.com/docs/auth_signatures
         secret = '7ad3773142a6692b25b8', -- Example http://pusher.com/docs/auth_signatures
         ....
 
@@ -47,9 +47,15 @@ where
 The event that pusher.com sends out when a message is received on a channel is called "client-message"
 Anyone connected to the channel via another pusherhub object connected to your app and the same channel,
 will receive the message in the function assigned to the client-message binding (it must be a function).
+What's more, public channels are now restricted to server-side/custom messages. client-message, which comes
+from another client, can't be forwarded to public channels. You must use a private- or presence- channel.
 
     mychathub.subscribe({
-        channel = "test_channel",
+        channel = "presence-test_channel",
+        channel_data = {              -- necessary for presence and private channels
+            user_id = 1,              -- Example
+            username = "testusername" -- Example
+        },
         bindings = {
         
             --[[ this is what happens when any client sees the message, including user who sent it ]]--
@@ -87,7 +93,11 @@ Some people aren't noticing the example usage at the bottom of the pusherhub.lua
                 print("Connected to chat server.")
                 print("Attempting to join Gen Chat...")
                 mychathub.subscribe({
-                    channel = "test_channel",
+                    channel = "presence-test_channel",
+                    channel_data = {              -- necessary for presence and private channels
+                        user_id = 1,              -- Example
+                        username = "testusername" -- Example
+                    },
                     bindings = {
                         ["client-message"] = function(msg1)
                             print("test client-message",msg1)
