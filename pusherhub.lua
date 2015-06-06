@@ -25,8 +25,8 @@ local self = {
     sock = nil,
     buffer = '',
     channels = {},
-    readyState = 3,
-    --0 (connecting), 1 (open), 2 (closing), and 3 (closed).
+    readyState = 3, --0 (connecting), 1 (open), 2 (closing), and 3 (closed).
+    params = nil,
 }
 
 self.lpad = function(str, len, char)
@@ -36,7 +36,6 @@ self.lpad = function(str, len, char)
     end
     return string.rep(char, len - #str)..str
 end
-
 -- Converts a string of bits into a decimal number.
 self.bytesToDec = function(str)
     local bits = ''
@@ -56,17 +55,30 @@ self.toBits = function(num)
     end
     return string.reverse(table.concat(t))
 end
+
+-- This reads the first 2 bytes from messages that are incoming - see enterFrame
 self.parseHeader = function(headerbytes)
     local fbyte = string.sub(headerbytes,1,1) -- first
+    --print("debug fbyte",fbyte) -- usually unreadable
     local fbits = self.toBits(string.byte(fbyte))
-    local opcode = tonumber("0000"..string.sub(fbits,5),2)
+    --print("debug fbits",fbits) -- will be 8 bits
+    local opcode = tonumber("0000"..string.sub(fbits,5),2) -- this is how you determine opcode
 
     local sbyte = string.sub(headerbytes,2) -- second, this strips the mask bit off
+    --print("debug sbyte",sbyte) -- may be unreadable byte
     local sbits = self.toBits(string.byte(sbyte))
+    --print("debug sbits",sbits) -- will be 7 bits
     local payloadlen = tonumber("0"..sbits,2) -- this pads the missing mask bit on
-    --print("opcode:",opcode,"payloadlen:",payloadlen)
+    
+    -- Example, this works out to be 84 bytes:
+    --{"event":"pusher:connection_established","data":"{\"socket_id\":\"46276.4985621\"}"}
+    --so payloadlen = 84
+    
+    --print("debug opcode:",opcode)
+    --print("debug payloadlen:",payloadlen)
     return opcode, payloadlen
 end
+
 self.handleBytes = function(byes)
     --print("some binary msg",byes)
     local chrs = {}
@@ -120,9 +132,9 @@ self.makeFrame = function(str,pong)
             -- TODO: Construct continuation frames for when data is too large?! Don't know what limit pusher has.
         end
     end
-    --print("strLen is",strLen,self.toBits(strLen))
+    --print("debug strLen is",strLen,self.toBits(strLen))
     binStr = binStr..self.lpad(self.toBits(strLen),pad,"0") -- 7 or 7+16 or 7+64 bits to represent message byte length
-    --print("binStr",binStr, "pad:", pad)
+    --print("debug binStr",binStr, "pad:", pad)
 
     -- This chops the binStr into 8 bit groups, called bitgroups (bytes)
     local s = 1
@@ -139,7 +151,7 @@ self.makeFrame = function(str,pong)
         -- Now that we've assembled a delicate set of bits, move to bytes
         ret = ret..string.char(tonumber(bitGroups[i],2))
     end
-    --print("final size",table.concat(bitGroups),str,string.len(str)) -- use http://home.paulschou.net/tools/xlate/
+    --print("debug final size",table.concat(bitGroups),str,string.len(str)) -- use http://home.paulschou.net/tools/xlate/
     -- Leading bytes are the header for the frame. Ta-da
     return ret..str
 end
@@ -150,6 +162,7 @@ self.websocketresponse6 = function(key)
 end
 self.new = function (params) -- constructor method
     params = params or {}
+    self.params = params
     params.port = params.port or 80
     if not params.server or not params.key or not params.secret or not params.app_id then
         print("PusherHub requires server, key, secret, app_id, readyCallback function and defaults to port 80")
@@ -209,11 +222,10 @@ self.new = function (params) -- constructor method
 end
 self.subscribe = function(params)
     local string_to_sign, proper, strange
-    print("channel data was",params.channel_data)
+    --print("channel data was",params.channel_data)
     if type(params.channel_data) ~= 'table' then
         params.channel_data = {}
     end
-    params.channel = params.channel or 'test_channel'
     params.private = false
     params.presence = false
     if string.sub(params.channel,1,8) == "private-" then
@@ -287,6 +299,8 @@ self.publish = function(msg)
     --print("bytes published",num_byes)
     return true
 end
+
+-- The receiver loop
 self.enterFrame = function(evt)
     local msg, chr, str, opcode, payloadlen, payloadstart, payloadend
     local chrs = {}
@@ -321,9 +335,10 @@ self.enterFrame = function(evt)
                 --print("skt",skt) -- raw text info, like streamed headers
             end
         end -- /while-do
+        
         -- now, checking if a message is present in buffer...
         while got_something_new do  --  this is for a case of several messages stocked in the buffer
-            --print("buffer:"..string.len(self.buffer),self.buffer)
+            --print("debug buffer:"..string.len(self.buffer),self.buffer)
             -- Standard message for pusher.com (some bytes header, then json)
 
             -- first 2 bytes tell us a great deal.
@@ -332,35 +347,52 @@ self.enterFrame = function(evt)
 
             payloadstart = 3 -- bytes. no more metadata. the start byte number is offset by 2 bytes of required metadata
             payloadend = payloadlen+2 -- bytes. the end byte number is offset by 2 bytes of required metadata
+            --[[print("debug intial look:",util.xmp({
+                pstart=payloadstart,
+                pend=payloadend
+            }))]]--
 
             if payloadlen == 126 then -- we have 2 more bytes of metadata...beyond the required 2
+                -- if payloadlen == 126, that means the first 2 bytes were maxed out in size
+                -- we have to strip out those 2 other (probably) unreadable bytes that follow and calc the full length
+                
+                -- This is the byte for the start of the actual message (not metadata)
                 payloadstart = 5 -- starts on 5th byte.
                                  -- first 4 bytes of message are header data.
                                  -- 2 required meta, 2 payload length description (16 bits)
 
                 -- bytesToDec converts the bits in the included bytes, to a decimal number
                 payloadend = self.bytesToDec(string.sub(self.buffer,3,4)) -- this is inclusive, 3rd and 4th bytes
-                                                                          -- represents the number of payload bytes
-                payloadend = payloadend+2 -- bytes. offset by 2 more bytes of the payload length metadata
+                --print("debug 126 mode, payloadend =", payloadend)
+                
+                -- represents the number of payload bytes
+                payloadend = payloadend+4 -- bytes. length of message + 4 metadata
             elseif payloadlen == 127 then -- we have 8 more bytes of metadata
+                -- if payloadlen == 127, that means the first 2 bytes were maxed out in size
+                -- we have to strip out those 8 other (probably) unreadable bytes that follow and calc the full length
+                
+                -- This is the byte for the start of the actual message (not metadata)
                 payloadstart = 11 -- starts on 11th byte.
                                   -- first 10 bytes of message are header data.
                                   -- 2 required meta, 8 payload length description (64 bits)
 
                 -- bytesToDec converts the bits in the included bytes, to a decimal number
                 payloadend = self.bytesToDec(string.sub(self.buffer,3,10)) -- this is inclusive, 3rd through 10th bytes
-                                                                           -- represents the number of payload bytes
-                payloadend = payloadend+8 -- bytes. offset by 8 more bytes of the payload length metadata
+                --print("debug 127 mode, payloadend =", payloadend)
+                
+                -- represents the number of payload bytes
+                payloadend = payloadend+10 -- bytes. payload + 10 bytes of metadata
             end
 
             -- this needs to be correct so that we're sure of how long the message is
             -- most clients, like firefox or chrome, cut off after 32k as of 2012 and probably till today
             msg = string.sub(self.buffer, payloadstart, payloadend)
-
-            --print("msg",msg)
+            
+            --print("debug opcode", opcode)
+            --print("debug msg",msg)
 
             msg = json.decode(msg)
-            --print("decoded msg",msg)
+            --print("debug decoded msg",msg)
             if msg ~= nil then -- valid json
                 -- Startup Connection parsing, specific to pusher.com
                 if msg.event == "pusher:connection_established" then
@@ -369,7 +401,7 @@ self.enterFrame = function(evt)
                     end 
                     self.socket_id = msg.data.socket_id
                     self.readyState = 1
-                    self.readyCallback() -- should call subscribe, I hope! If not, whatever.
+                    self.readyCallback(self.params) -- should call subscribe, I hope! If not, whatever.
 
                 -- This is a pusher protocol error. Not fatal. Default behavior is disconnect()
                 elseif msg.event == "pusher:error" then
@@ -417,14 +449,34 @@ self.enterFrame = function(evt)
             end
 
             self.buffer = string.sub(self.buffer,payloadstart+payloadend)
-            if self.buffer == '' then
-                got_something_new = false
-            end
+            got_something_new = self.buffer ~= '' -- if not empty, got something new
         end
     end
 end -- /enterFrame
 return self
-
+--[[
+--Handy for dumping table data to console
+util = {
+    xmp = function(o, depth)
+        if depth == nil then depth = 1 end
+        if type(o) == 'table' then
+            local s = '{'
+            depth = depth-1
+            if depth >= 0 then
+                for k,v in pairs(o) do
+                    if type(k) ~= 'number' then k = '"'..k..'"' end
+                    s = s .. '['..k..'] = ' .. util.xmp(v,depth) .. ','
+                end
+            else
+                s = s..'?'
+            end
+            return s .. '} '
+        else
+            return tostring(o)
+        end
+    end
+}
+--]]
 
 --[[
 -- Example Usage 
@@ -436,6 +488,11 @@ return self
         secret = '7ad3773142a6692b25b8', -- Example http://pusher.com/docs/auth_signatures
         server = "ws.pusherapp.com",
         port = 80,
+        channel = "presence-general_chat",
+        channel_data = {
+            user_id = 1,           -- Example user id
+            username = "username1" --Example username 
+        },
         disconnectCallback = function()
             scene:dispatchEvent("chatDisconnect",scene)
         end,
@@ -443,21 +500,34 @@ return self
             scene:dispatchEvent("chatError", scene)
             scene:dispatchEvent("chatDisconnect",scene)
         end,
-        readyCallback = function()
+        readyCallback = function(params)
             print("Connected to chat server.")
-            print("Attempting to join Gen Chat...")
             mychathub.subscribe({
-                channel = "test_channel",
+                channel = params.channel,
+                channel_data = params.channel_data,
                 bindings = {
-                    ["client-message"] = function(msg1)
-                        print("test client-message",msg1)
+                    ["client-message"] = function(t_client_msg)
+                        print("pusher_internal:client-message")
+                        print("event", t_client_msg.event)
+                        print("channel", t_client_msg.channel)
+                        print("data", t_client_msg.data)
                     end,
-                    ["pusher_internal:subscription_succeeded"] = function(msg2) -- Msg2 is a table
-                        print("test pusher_internal:subscription_succeeded",msg2.event) 
-                        print("Joined Gen Chat.")
+                    ["pusher_internal:subscription_succeeded"] = function(t_sub_state)
+                        print("pusher_internal:subscription_succeeded")
+                        print("event", t_sub_state.event)
+                        print("channel", t_sub_state.channel)
+                        print("data", t_sub_state.data)
+                        print("Joined "..params.channel)
+
+                        -- example message to broadcast when you join the channel
+                        --mychathub.publish('{"event":"client-message","data": {"message":"'..params.channel_data.username..' joined '..params.channel..'"},"channel":"'..params.channel..'"}')
                     end
                 }
             })
         end
     })
+
+
+
+
 ]]--

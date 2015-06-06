@@ -64,50 +64,60 @@ from another client, can't be forwarded to public channels. You must use a priva
             end,
             ....
  
-This specific binding is called from this line, if you care:
+This specific binding is called from this line, if you care to inspect the library file:
 
     self.channels[msg.channel]["events"][msg.event](msg)
 
 I put the mychathub in the scope of my scene as leaving the scene will destroy the connection. Some people may want to create it as a global resource. It's up to you.
 
-Some people aren't noticing the example usage at the bottom of the pusherhub.lua:
+Some people aren't noticing the example usage at the bottom of the pusherhub.lua, so I've included it here.
 
-    --[[
+--[[
     -- Example Usage 
-        print("connecting to chat server...")
-        mychathub = nil -- global
-        mychathub = pusherhub.new({ 
-            app_id = '12345', -- Example
-            key = '278d425bdf160c739803', -- Example http://pusher.com/docs/auth_signatures
-            secret = '7ad3773142a6692b25b8', -- Example http://pusher.com/docs/auth_signatures
-            server = "ws.pusherapp.com",
-            port = 80,
-            disconnectCallback = function()
-                scene:dispatchEvent("chatDisconnect",scene)
-            end,
-            pushererrorCallback = function()
-                scene:dispatchEvent("chatError", scene)
-                scene:dispatchEvent("chatDisconnect",scene)
-            end,
-            readyCallback = function()
-                print("Connected to chat server.")
-                print("Attempting to join Gen Chat...")
-                mychathub.subscribe({
-                    channel = "presence-test_channel",
-                    channel_data = {              -- necessary for presence and private channels
-                        user_id = 1,              -- Example
-                        username = "testusername" -- Example
-                    },
-                    bindings = {
-                        ["client-message"] = function(msg1)
-                            print("test client-message",msg1)
-                        end,
-                        ["pusher_internal:subscription_succeeded"] = function(msg2) -- Msg2 is a table
-                            print("test pusher_internal:subscription_succeeded",msg2.event) 
-                            print("Joined Gen Chat.")
-                        end
-                    }
-                })
-            end
-        })
-    ]]--
+    print("connecting to chat server...")
+    mychathub = nil -- global
+    mychathub = pusherhub.new({ 
+        app_id = '12345', -- Example
+        key = '278d425bdf160c739803', -- Example http://pusher.com/docs/auth_signatures
+        secret = '7ad3773142a6692b25b8', -- Example http://pusher.com/docs/auth_signatures
+        server = "ws.pusherapp.com",
+        port = 80,
+        channel = "presence-general_chat",
+        channel_data = {
+            user_id = 1,           -- Example user id
+            username = "username1" --Example username 
+        },
+        disconnectCallback = function()
+            scene:dispatchEvent("chatDisconnect",scene)
+        end,
+        pushererrorCallback = function()
+            scene:dispatchEvent("chatError", scene)
+            scene:dispatchEvent("chatDisconnect",scene)
+        end,
+        readyCallback = function(params)
+            print("Connected to chat server.")
+            mychathub.subscribe({
+                channel = params.channel,
+                channel_data = params.channel_data,
+                bindings = {
+                    ["client-message"] = function(t_client_msg)
+                        print("pusher_internal:client-message")
+                        print("event", t_client_msg.event)
+                        print("channel", t_client_msg.channel)
+                        print("data", t_client_msg.data)
+                    end,
+                    ["pusher_internal:subscription_succeeded"] = function(t_sub_state)
+                        print("pusher_internal:subscription_succeeded")
+                        print("event", t_sub_state.event)
+                        print("channel", t_sub_state.channel)
+                        print("data", t_sub_state.data)
+                        print("Joined "..params.channel)
+
+                        -- example message to broadcast when you join the channel
+                        --mychathub.publish('{"event":"client-message","data": {"message":"'..params.channel_data.username..' joined '..params.channel..'"},"channel":"'..params.channel..'"}')
+                    end
+                }
+            })
+        end
+    })
+]]--
