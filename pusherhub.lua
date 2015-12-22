@@ -392,34 +392,36 @@ self.enterFrame = function(evt)
             --print("debug msg",msg)
 
             msg = json.decode(msg)
-            --print("debug decoded msg",msg)
-            if msg ~= nil then -- valid json
-                -- Startup Connection parsing, specific to pusher.com
-                if msg.event == "pusher:connection_established" then
-                    if type(msg.data) == "string" then
-                     msg.data = json.decode(msg.data)
-                    end 
-                    self.socket_id = msg.data.socket_id
-                    self.readyState = 1
-                    self.readyCallback(self.params) -- should call subscribe, I hope! If not, whatever.
-
-                -- This is a pusher protocol error. Not fatal. Default behavior is disconnect()
-                elseif msg.event == "pusher:error" then
-                    if type(msg.data) == "string" then
-                     msg.data = json.decode(msg.data)
-                    end 
-                    self.pushererrorCallback(msg.data)
-                    --print("Nonfatal Err:",msg.data.message)
-
-                -- This is the catch-all binding code. If you have a handler, it gets called.
-                elseif self.channels[msg.channel] ~= nil and type(self.channels[msg.channel]["events"][msg.event]) == "function" then -- typical msg
-                    --print("standard event")
-                    if type(msg.data) == "string" then
-                     msg.data = json.decode(msg.data)
-                    end 
-                    self.channels[msg.channel]["events"][msg.event](msg)
-                end
+            if msg == nil then
+              break
             end
+                
+            -- Startup Connection parsing, specific to pusher.com
+            if msg.event == "pusher:connection_established" then
+                if type(msg.data) == "string" then
+                 msg.data = json.decode(msg.data)
+                end 
+                self.socket_id = msg.data.socket_id
+                self.readyState = 1
+                self.readyCallback(self.params) -- should call subscribe, I hope! If not, whatever.
+
+            -- This is a pusher protocol error. Not fatal. Default behavior is disconnect()
+            elseif msg.event == "pusher:error" then
+                if type(msg.data) == "string" then
+                 msg.data = json.decode(msg.data)
+                end 
+                self.pushererrorCallback(msg.data)
+                --print("Nonfatal Err:",msg.data.message)
+
+            -- This is the catch-all binding code. If you have a handler, it gets called.
+            elseif self.channels[msg.channel] ~= nil and type(self.channels[msg.channel]["events"][msg.event]) == "function" then -- typical msg
+                --print("standard event")
+                if type(msg.data) == "string" then
+                 msg.data = json.decode(msg.data)
+                end 
+                self.channels[msg.channel]["events"][msg.event](msg)
+            end
+            
             if opcode == 0 then
                 -- TODO: continuation support
                 print("continuation frames are not yet supported!")
